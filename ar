@@ -1,0 +1,429 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+#---------------------------------------------------------$
+#"THE BEER-WARE LICENSE" (Revision 42):
+#<Buka> wrote this file.  As long as you
+#retain this notice you can do whatever you want with
+#this stuff. If we meet some day, and you think this
+#stuff is worth it, you can buy me a beer in return.
+#Buka
+#---------------------------------------------------------$
+
+########################
+#Default Variables
+########################
+
+shopt -s extglob
+
+folderIcon="📂"
+otherIcon="📜"
+upDirIcon="🔙"
+actionIcon="✅"
+archiveIcon="📦"
+
+packageList="sed gawk jq tar bsdtar zip unzip p7zip cpio xz-utils lzip bzip2 gzip"
+
+binList="sed awk tar jq bsdtar zip unzip 7z cpio xz lzip bzip2 gzip"
+
+dictSizes="1m,2m,4m,8m,16m,32m,64m,128m,256m,512m,1024m"
+
+archiveTypes=".zip|.7z|.iso|.gz|.bz2|.xz|.lz|.rar|.jar|.apk|.tar"
+
+########################
+#Functions
+########################
+
+getSelection(){
+    selection="$(jq -r '.text' <<< "$1")"
+}
+
+getExCode(){
+    excode="$(jq -r '.code' <<< "$1")"
+    if [[ ! "$excode" == "$2" ]]
+    then
+        exit 0
+    fi
+}
+buildListing(){
+    if [[ "$1" == "dirs" ]]
+    then
+        listing="$(ls -d .*/ */ | cut -f1 -d'/' | tail -n+3)"
+    else
+        listing="$(ls -A --group-directories-first)"
+    fi
+    for kv in $listing
+    do
+        if [[ -z "$dirList" ]]
+        then
+            delSym=''
+        else
+            delSym=','
+        fi
+        if [[ -f "$kv" ]]
+        then
+            if [[ "$kv" =~ (${archiveTypes})$ ]]
+            then
+                fileIcon="$archiveIcon"
+            else
+                fileIcon="$otherIcon"
+            fi
+            dirList="${dirList}${delSym}${fileIcon} ${kv}"
+        elif [[ -d "$kv" ]]
+        then
+            dirList="${dirList}${delSym}${folderIcon} ${kv}"
+        fi
+    done
+}
+buildSelectionList(){
+    buildListing
+    out="$(termux-dialog checkbox -t "$(pwd)" -v "${dirList}")"
+    getExCode "$out" "-1"
+    getSelection "$out"
+    selection="$(sed 's/^.//;s/.$//;s/^/ /' <<< "$selection")"
+    IFS=','
+    for kv in $selection
+    do
+        addFile="$(sed 's/^...//' <<< "$kv")"
+        fileList="${fileList} ${addFile}"
+    done
+    unset IFS
+    if [[ "$selection" == "" ]]
+    then
+        exit 0
+    fi
+}
+archive(){
+    out="$(termux-dialog radio -t "Format:" \
+    -v "zip,7z,tar,tar.gz,tar.bz2,tar.xz,tar.lz,tar.7z,cpio,cpio.gz,cpio.bz2,cpio.xz,cpio.lz,cpio.7z")"
+    getExCode "$out" "-1"
+    getSelection "$out"
+    archiveType="$selection"
+    case "$archiveType" in
+        *"gz")
+            opts="Set compression level"
+        ;;
+        *"bz2")
+            opts="Set compression level"
+        ;;
+        *"xz")
+            opts="Set compression level"
+        ;;
+        *"lz")
+            opts="Set compression level,Set dictionary size"
+        ;;
+        *"7z")
+            opts="Add password,Split into volumes,Create SFX,Header encryption,Solid archive,Set compression level,Set dictionary size"
+        ;;
+        "zip")
+            opts="Add password,Split into volumes,Set compression level"
+        ;;
+    esac
+    if [[ -n "$opts" ]]
+    then
+        out="$(termux-dialog checkbox -t "Options:" -v "$opts")"
+        getExCode "$out" "-1"
+        getSelection "$out"
+    fi
+
+    case "$selection" in
+        *"Add password"*)
+            while [[ ( ! "$encrPass" == "$confPass") || ( -z "$encrPass") ]]
+            do
+                out="$(termux-dialog text -p -i "Password" -t "Enter password:")"
+                getExCode "$out" "-1"
+                getSelection "$out"
+                encrPass="$selection"
+                out="$(termux-dialog text -p -i "Password" -t "Repeat:")"
+                getExCode "$out" "-1"
+                getSelection "$out"
+                confPass="$selection"
+                if [[ "$encrPass" == "confPass" ]]
+                then
+                    break
+                else
+                    echo "test"
+                fi
+            done
+        ;;&
+        *"Split into volumes"*)
+            while [[ ! "$volSize" =~ ^[0-9]{1,5}$ ]]
+            do
+                out="$(termux-dialog text -n -t "Volume size:")"
+                getExCode "$out" "-1"
+                getSelection "$out"
+                volSize="$selection"
+                if [[ "$volSize" =~ ^[0-9]{1,5}$ ]]
+                then
+                    break
+                else
+                    echo "test"
+                fi
+            done
+        ;;&
+        *"Create SFX"*)
+            sfxArchive="yes"
+        ;;&
+        *"Header encryption"*)
+            headerEncr="yes"
+        ;;&
+        *"Solid archive"*)
+            solidArchive="yes"
+        ;;&
+        *"Set compression level"*)
+            out="$(termux-dialog counter -t "Compression level:" -r "0,6,9")"
+            getExCode "$out" "-1"
+            getSelection "$out"
+            compLevel="$selection"
+        ;;&
+        *"Set dictionary size"*)
+            out="$(termux-dialog spinner -t "Dictionary size:" -v "${dictSizes}")"
+            getExCode "$out" "-1"
+            getSelection "$out"
+            dictSize="$selection"
+        ;;
+    esac
+    addPath Compress
+    pwd
+    while [[ ( -z "$filename" ) || ( -e "$(realpath "$filename")" ) ]]
+    do
+        out="$(termux-dialog text -t "Enter archive name:" -i "archive.${archiveType}")"
+        getSelection "$out"
+        if [[ -z "$selection" ]]
+        then
+            filename="${additionalPath}/$(pwd | sed 's/.*\///').${archiveType}"
+        else
+            filename="${additionalPath}/$selection.${archiveType}"
+        fi
+        if [[ -e "$(realpath "$filename")" ]]
+        then
+            out="$(termux-dialog confirm -t "File already exists, overwrite?")"
+            getExCode "$out" "0"
+            getSelection "$out"
+            if [[ "$selection" == "yes" ]]
+            then
+                break 1
+            fi
+        fi
+    done
+    echo $filename
+    case "$archiveType" in
+    "zip")
+        [[ -n "$encrPass" ]] && encrPass="-P ${encrPass}"
+        [[ -n "$volSize" ]] && volSize="-s${volSize}m"
+        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
+        zip -r "${encrPass}" "${volSize}" "${compLevel}" "$filename" $1
+    ;;
+    "7z")
+        [[ -n "$encrPass" ]] && encrPass="-p${encrPass}"
+        [[ -n "$volSize" ]] && volSize="-v${volSize}m"
+        [[ -n "$sfxArchive" ]] && sfxArchive="-sfx"
+        [[ -n "$headerEncr" ]] && headerEncr="-mhe=on"
+        [[ -n "$solidArchive" ]] && solidArchive="-ms=on"
+        [[ -n "$compLevel" ]] && compLevel="-mx=${compLevel}"
+        [[ -n "$dictSize" ]] && dictSize="-md=${dictSize}"
+        7z a "${encrPass}" "${volSize}" "${sfxArchive}" \
+        "${headerEncr}" "${solidArchive}" "${compLevel}" \
+        "${dictSize}" "$filename" $1
+    ;;
+    "tar")
+        tar -cf "$filename" $1
+    ;;
+    "tar.gz")
+        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
+        tar -cf - $1 | gzip "$compLevel" - > "$filename"
+    ;;
+    "tar.bz2")
+        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
+        tar -cf - $1 | bzip2 "$compLevel" - > "$filename"
+    ;;
+    "tar.xz")
+        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
+        tar -cf - $1 | xz "$compLevel" > "$filename"
+    ;;
+    "tar.lz")
+        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
+        [[ -n "$dictSize" ]] && dictSize="--dictionary-size==${dictSize}M"
+        tar -cf - $1 | lzip "$compLevel" "$dictSize" > "$filename"
+    ;;
+    "tar.7z")
+        [[ -n "$encrPass" ]] && encrPass="-p${encrPass}"
+        [[ -n "$volSize" ]] && volSize="-v${volSize}m"
+        [[ -n "$sfxArchive" ]] && sfxArchive="-sfx"
+        [[ -n "$headerEncr" ]] && headerEncr="-mhe=on"
+        [[ -n "$solidArchive" ]] && solidArchive="-ms=on"
+        [[ -n "$compLevel" ]] && compLevel="-mx=${compLevel}"
+        [[ -n "$dictSize" ]] && dictSize="-md=${dictSize}"
+        tar cf - $1 | 7z a -si "${encrPass}" "${volSize}" "${sfxArchive}" \
+        "${headerEncr}" "${solidArchive}" "${compLevel}" \
+        "${dictSize}" "$filename"
+    ;;
+    "cpio")
+        find $1 -print -depth | cpio -ov > "$filename"
+    ;;
+    "cpio.gz")
+        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
+        find $1 -print -depth | cpio -ov | gzip "$compLevel" - > "$filename"
+    ;;
+    "cpio.bz2")
+        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
+        find $1 -print -depth | cpio -ov | bzip2 "$compLevel" - > "$filename"
+    ;;
+    "cpio.xz")
+        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
+        find $1 -print -depth | cpio -ov | xz "$compLevel" > "$filename"
+    ;;
+    "cpio.lz")
+        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
+        [[ -n "$dictSize" ]] && dictSize="--dictionary-size==${dictSize}M"
+        find $1 -print -depth | cpio -ov | lzip "$compLevel" "$dictSize" > "$filename"
+    ;;
+    "cpio.7z")
+        [[ -n "$encrPass" ]] && encrPass="-p${encrPass}"
+        [[ -n "$volSize" ]] && volSize="-v${volSize}m"
+        [[ -n "$sfxArchive" ]] && sfxArchive="-sfx"
+        [[ -n "$headerEncr" ]] && headerEncr="-mhe=on"
+        [[ -n "$solidArchive" ]] && solidArchive="-ms=on"
+        [[ -n "$compLevel" ]] && compLevel="-mx=${compLevel}"
+        [[ -n "$dictSize" ]] && dictSize="-md=${dictSize}"
+        find $1 -print -depth | cpio -ov | 7z a -si "${encrPass}" "${volSize}" "${sfxArchive}" \
+        "${headerEncr}" "${solidArchive}" "${compLevel}" \
+        "${dictSize}" "$filename"
+    ;;
+    esac
+}
+calculateChecksum(){
+    checkSum="$($2 "$1" | awk -F ' ' '{print $1}')"
+    clipboardSum="$(termux-clipboard-get)"
+    if [[ "$checkSum" == "$clipboardSum" ]]
+    then
+        compareResult="Checksums are matching"
+    else
+        compareResult="Checksums are NOT matching"
+    fi
+    out="$(termux-dialog confirm -i "Checksum:${checkSum} Clipboard:${clipboardSum} ${compareResult}")"
+    getSelection "$out"
+    if [[ "$selection" == "yes" ]]
+    then
+        termux-clipboard-set "$checkSum"
+    fi
+}
+addPath(){
+    workingDir="$(pwd)"
+    while [[ true ]]
+    do
+        unset dirList
+        buildListing dirs
+        out="$(termux-dialog radio -t "$(pwd)" -v "${actionIcon} "$1" here,${upDirIcon} Go to parent directory,${dirList}")"
+        getSelection "$out"
+        getExCode "$out" "-1"
+        selection="$(sed 's/^..//' <<< "$selection")"
+        if [[ "$selection" == ""$1" here" && ! -e "Use this dir" ]]
+        then
+            additionalPath="$(pwd)"
+            break 1
+        elif [[ "$selection" == "Go to parent directory" && ! -e "Go to parent directory" ]]
+        then
+            cd ..
+        elif [[ -d "$(realpath "${selection}")" ]]
+        then
+            cd "$selection"
+        fi
+    done
+    cd "$workingDir"
+}
+extract(){
+    if [[ "$1" =~ (${archiveTypes})$ ]]
+    then
+        opts="Extract,Calculate md5,Calculate sha256,Calculate sha512"
+    else
+        opts="Calculate md5,Calculate sha256,Calculate sha512"
+    fi
+    out="$(termux-dialog radio -v "$opts" -t "Select operation:")"
+    getExCode "$out" "-1"
+    getSelection "$out"
+    case "$selection" in
+        "Extract")
+            addPath "Extract"
+            folderName="${additionalPath}/$(sed 's/\..*$//' <<< "$1")"
+            realFile="$(realpath $1)"
+            case "$1" in
+            *".zip")
+                #touch "$folderName"
+                unzip "$1" -d "$folderName"
+            ;;
+            *".tar")
+                echo "$folderName"
+                mkdir "$folderName"
+                cd "$folderName"
+                tar -xf "$realFile"
+                cd -
+            ;;
+            *"7z")
+                mkdir "$folderName"
+                cd "$folderName"
+                7z e "realFile"
+                cd -
+            ;;
+            *"tar.7z")
+                mkdir "$folderName"
+                cd "$folderName"
+                tar -x "$realFile" | 7z e -si
+                cd -
+            ;;
+            esac
+        ;;
+        "Calculate md5")
+            calculateChecksum "$1" md5sum
+        ;;
+        "Calculate sha256")
+            calculateChecksum "$1" sha256sum
+        ;;
+        "Calculate sha512")
+            calculateChecksum "$1" sha512sum
+        ;;
+    esac
+}
+
+########################
+#Main section
+########################
+
+for pkg in $binList
+do
+    if [[ ! -f "/data/data/com.termux/files/usr/bin/$pkg" ]]
+    then
+        out="$(termux-dialog confirm -t "Missing packages" -i "Some packages are missing in your termux installation. Install them now?")"
+        getSelection "$out"
+        if [[ "$selection" == "yes" ]]
+        then
+            apt-get -y install $packageList
+        fi
+        exit 0
+    fi
+done
+
+cd ~/storage/shared
+
+while [[ true ]]
+do
+    unset dirList
+    buildListing
+    out="$(termux-dialog radio -t "$(pwd)" -v "${actionIcon} Use this dir,${upDirIcon} Go to parent directory,${dirList}")"
+    getSelection "$out"
+    getExCode "$out" "-1"
+    selection="$(sed 's/^..//' <<< "$selection")"
+    if [[ "$selection" == "Use this dir" && ! -e "Use this dir" ]]
+    then
+        buildSelectionList
+        archive "$fileList"
+    elif [[ "$selection" == "Go to parent directory" && ! -e "Go to parent directory" ]]
+    then
+        cd ..
+    elif [[ -d "$(realpath "${selection}")" ]]
+    then
+        cd "$selection"
+    elif [[ -f "$(realpath "${selection}")" ]]
+    then
+        extract "$selection"
+    fi
+done
