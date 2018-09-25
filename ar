@@ -27,7 +27,7 @@ binList="sed awk tar jq bsdtar zip unzip 7z cpio xz lzip bzip2 gzip"
 
 dictSizes="1m,2m,4m,8m,16m,32m,64m,128m,256m,512m,1024m"
 
-archiveTypes=".zip|.7z|.iso|.gz|.bz2|.xz|.lz|.rar|.jar|.apk|.tar"
+archiveTypes=".zip|.7z|.iso|.gz|.bz2|.xz|.lz|.rar|.jar|.apk|.tar|.001|.tgz|.tbz2|.txz|.tlz|.lzma|.t7z"
 
 ########################
 #Functions
@@ -75,6 +75,7 @@ buildListing(){
     done
 }
 buildSelectionList(){
+    unset dirList
     buildListing
     out="$(termux-dialog checkbox -t "$(pwd)" -v "${dirList}")"
     getExCode "$out" "-1"
@@ -92,7 +93,17 @@ buildSelectionList(){
         exit 0
     fi
 }
+buildArguments(){
+    argList="$(sed 's/  */ /g' <<< "$encrPass $volSize $sfxArchive $headerEncr $solidArchive $compLevel $dictSize")"
+}
 archive(){
+    unset encrPass
+    unset volSize
+    unset sfxArchive
+    unset headerEncr
+    unset solidArchive
+    unset compLevel
+    unset dictSize
     out="$(termux-dialog radio -t "Format:" \
     -v "zip,7z,tar,tar.gz,tar.bz2,tar.xz,tar.lz,tar.7z,cpio,cpio.gz,cpio.bz2,cpio.xz,cpio.lz,cpio.7z")"
     getExCode "$out" "-1"
@@ -183,10 +194,10 @@ archive(){
         ;;
     esac
     addPath Compress
-    pwd
     while [[ ( -z "$filename" ) || ( -e "$(realpath "$filename")" ) ]]
     do
-        out="$(termux-dialog text -t "Enter archive name:" -i "archive.${archiveType}")"
+        out="$(termux-dialog text -t "Enter archive name:" -i "$(pwd | sed 's/.*\///').${archiveType}")"
+        getExCode "$out" "-1"
         getSelection "$out"
         if [[ -z "$selection" ]]
         then
@@ -205,13 +216,15 @@ archive(){
             fi
         fi
     done
-    echo $filename
+    notifId="$(cat /proc/sys/kernel/random/uuid)"
+    termux-notification --content "Compressing..." --id "$notifId"
     case "$archiveType" in
     "zip")
-        [[ -n "$encrPass" ]] && encrPass="-P ${encrPass}"
-        [[ -n "$volSize" ]] && volSize="-s${volSize}m"
-        [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
-        zip -r "${encrPass}" "${volSize}" "${compLevel}" "$filename" $1
+        [[ -n "$encrPass" ]] && encrPass="-p${encrPass}"
+        [[ -n "$volSize" ]] && volSize="-v${volSize}m"
+        [[ -n "$compLevel" ]] && compLevel="-mx=${compLevel}"
+        buildArguments
+        zip -r $argList "$filename" $1
     ;;
     "7z")
         [[ -n "$encrPass" ]] && encrPass="-p${encrPass}"
@@ -221,29 +234,32 @@ archive(){
         [[ -n "$solidArchive" ]] && solidArchive="-ms=on"
         [[ -n "$compLevel" ]] && compLevel="-mx=${compLevel}"
         [[ -n "$dictSize" ]] && dictSize="-md=${dictSize}"
-        7z a "${encrPass}" "${volSize}" "${sfxArchive}" \
-        "${headerEncr}" "${solidArchive}" "${compLevel}" \
-        "${dictSize}" "$filename" $1
+        buildArguments
+        7z a $argList "$filename" $1
     ;;
     "tar")
         tar -cf "$filename" $1
     ;;
     "tar.gz")
         [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
-        tar -cf - $1 | gzip "$compLevel" - > "$filename"
+        buildArguments
+        tar -cf - $1 | gzip $argList - > "$filename"
     ;;
     "tar.bz2")
         [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
-        tar -cf - $1 | bzip2 "$compLevel" - > "$filename"
+        buildArguments
+        tar -cf - $1 | bzip2 $argList - > "$filename"
     ;;
     "tar.xz")
         [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
-        tar -cf - $1 | xz "$compLevel" > "$filename"
+        buildArguments
+        tar -cf - $1 | xz $argList > "$filename"
     ;;
     "tar.lz")
         [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
         [[ -n "$dictSize" ]] && dictSize="--dictionary-size==${dictSize}M"
-        tar -cf - $1 | lzip "$compLevel" "$dictSize" > "$filename"
+        buildArguments
+        tar -cf - $1 | lzip $argList > "$filename"
     ;;
     "tar.7z")
         [[ -n "$encrPass" ]] && encrPass="-p${encrPass}"
@@ -253,29 +269,32 @@ archive(){
         [[ -n "$solidArchive" ]] && solidArchive="-ms=on"
         [[ -n "$compLevel" ]] && compLevel="-mx=${compLevel}"
         [[ -n "$dictSize" ]] && dictSize="-md=${dictSize}"
-        tar cf - $1 | 7z a -si "${encrPass}" "${volSize}" "${sfxArchive}" \
-        "${headerEncr}" "${solidArchive}" "${compLevel}" \
-        "${dictSize}" "$filename"
+        buildArguments
+        tar cf - $1 | 7z a -si $argList "$filename"
     ;;
     "cpio")
         find $1 -print -depth | cpio -ov > "$filename"
     ;;
     "cpio.gz")
         [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
-        find $1 -print -depth | cpio -ov | gzip "$compLevel" - > "$filename"
+        buildArguments
+        find $1 -print -depth | cpio -ov | gzip $argList - > "$filename"
     ;;
     "cpio.bz2")
         [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
-        find $1 -print -depth | cpio -ov | bzip2 "$compLevel" - > "$filename"
+        buildArguments
+        find $1 -print -depth | cpio -ov | bzip2 $argList - > "$filename"
     ;;
     "cpio.xz")
         [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
-        find $1 -print -depth | cpio -ov | xz "$compLevel" > "$filename"
+        buildArguments
+        find $1 -print -depth | cpio -ov | xz $argList > "$filename"
     ;;
     "cpio.lz")
         [[ -n "$compLevel" ]] && compLevel="-${compLevel}"
         [[ -n "$dictSize" ]] && dictSize="--dictionary-size==${dictSize}M"
-        find $1 -print -depth | cpio -ov | lzip "$compLevel" "$dictSize" > "$filename"
+        buildArguments
+        find $1 -print -depth | cpio -ov | lzip $argList > "$filename"
     ;;
     "cpio.7z")
         [[ -n "$encrPass" ]] && encrPass="-p${encrPass}"
@@ -285,22 +304,23 @@ archive(){
         [[ -n "$solidArchive" ]] && solidArchive="-ms=on"
         [[ -n "$compLevel" ]] && compLevel="-mx=${compLevel}"
         [[ -n "$dictSize" ]] && dictSize="-md=${dictSize}"
-        find $1 -print -depth | cpio -ov | 7z a -si "${encrPass}" "${volSize}" "${sfxArchive}" \
-        "${headerEncr}" "${solidArchive}" "${compLevel}" \
-        "${dictSize}" "$filename"
+        buildArguments
+        find $1 -print -depth | cpio -ov | 7z a -si $argList "$filename"
     ;;
     esac
+    termux-notification-remove "$notifId"
 }
 calculateChecksum(){
     checkSum="$($2 "$1" | awk -F ' ' '{print $1}')"
     clipboardSum="$(termux-clipboard-get)"
     if [[ "$checkSum" == "$clipboardSum" ]]
     then
-        compareResult="Checksums are matching"
+        compareResult="Checksums are matching."
     else
-        compareResult="Checksums are NOT matching"
+        compareResult="Checksums are NOT matching."
     fi
-    out="$(termux-dialog confirm -i "Checksum:${checkSum} Clipboard:${clipboardSum} ${compareResult}")"
+    out="$(termux-dialog confirm -i "Checksum:${checkSum} Clipboard:${clipboardSum} ${compareResult}\
+    Press "Yes" to copy checksum to clipboard.")"
     getSelection "$out"
     if [[ "$selection" == "yes" ]]
     then
@@ -334,9 +354,9 @@ addPath(){
 extract(){
     if [[ "$1" =~ (${archiveTypes})$ ]]
     then
-        opts="Extract,Calculate md5,Calculate sha256,Calculate sha512"
+        opts="Extract,Rename,Calculate md5,Calculate sha256,Calculate sha512"
     else
-        opts="Calculate md5,Calculate sha256,Calculate sha512"
+        opts="Rename,Calculate md5,Calculate sha256,Calculate sha512"
     fi
     out="$(termux-dialog radio -v "$opts" -t "Select operation:")"
     getExCode "$out" "-1"
@@ -346,31 +366,71 @@ extract(){
             addPath "Extract"
             folderName="${additionalPath}/$(sed 's/\..*$//' <<< "$1")"
             realFile="$(realpath $1)"
+            mkdir "$folderName"
+            cd "$folderName"
+            notifId="$(cat /proc/sys/kernel/random/uuid)"
+            termux-notification --content "Extracting..." --id "$notifId"
             case "$1" in
-            *".zip")
-                #touch "$folderName"
-                unzip "$1" -d "$folderName"
+            *".zip"|*".jar"|*".apk")
+                7z e "$realFile"
             ;;
             *".tar")
-                echo "$folderName"
-                mkdir "$folderName"
-                cd "$folderName"
                 tar -xf "$realFile"
-                cd -
             ;;
-            *"7z")
-                mkdir "$folderName"
-                cd "$folderName"
-                7z e "realFile"
-                cd -
+            *".cpio")
+                cpio -idv < "$realFile"
             ;;
-            *"tar.7z")
-                mkdir "$folderName"
-                cd "$folderName"
-                tar -x "$realFile" | 7z e -si
-                cd -
+            *".tar.7z"|*".t7z")
+                7z e "$realFile" -so | tar -x
+            ;;
+            *".cpio.7z")
+                7z e "$realFile" -so | cpio -idv
+            ;;
+            *".7z")
+                7z e "$realFile"
+            ;;
+            *".tar.gz"|*".tgz")
+                tar -xvzf "$realFile"
+            ;;
+            *".tar.bz2"|*".tbz"|*".tbz2")
+                tar -jxf "$realFile"
+            ;;
+            *".tar.xz"|*".txz")
+                tar -xJf "$realFile"
+            ;;
+            *".tar.lz"|*".tlz")
+                tar --lzip -xvf "$realFile"
+            ;;
+            *".cpio.gz")
+                gzip -dc "$realFile" | cpio -idmv
+            ;;
+            *".cpio.bz2")
+                bzip2 -dc "$realFile" | cpio -idmv
+            ;;
+            *".cpio.xz")
+                xz -dc "$realFile" | cpio -idmv
+            ;;
+            *".cpio.lz")
+                lzip -dc "$realFile" | cpio -idmv
             ;;
             esac
+            termux-notification-remove "$notifId"
+            cd -
+        ;;
+        "Rename")
+            out="$(termux-dialog text -t "Rename:" -i "$1")"
+            getExCode "$out" "-1"
+            getSelection "$out"
+            if [[ $(ls "$selection") ]]
+            then
+                out="$(termux-dialog confirm -t "File already exists" -i "Overwrite?")"
+                getSelection "$out"
+                if [[ ! "$selection" == "yes" ]]
+                then
+                    break 2
+                fi
+            fi
+            mv "$1" "$selection"
         ;;
         "Calculate md5")
             calculateChecksum "$1" md5sum
