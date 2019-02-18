@@ -216,7 +216,7 @@ archive(){
             fi
         fi
     done
-    notifId="$(cat /proc/sys/kernel/random/uuid)"
+    notifId="${RANDOM}"
     termux-notification --content "Compressing..." --id "$notifId"
     case "$archiveType" in
     "zip")
@@ -452,13 +452,14 @@ for pkg in $binList
 do
     if [[ ! -f "/data/data/com.termux/files/usr/bin/$pkg" ]]
     then
-        out="$(termux-dialog confirm -t "Missing packages" -i "Some packages are missing in your termux installation. Install them now?")"
-        getSelection "$out"
-        if [[ "$selection" == "yes" ]]
+        echo "Some packages are missing in your termux installation. Install them now? (y/n):"
+        read inp
+        if [[ "$inp" =~ [Yy] ]]
         then
-            apt-get -y install $packageList
+            apt install -y $packageList
+        else
+            exit 0
         fi
-        exit 0
     fi
 done
 
