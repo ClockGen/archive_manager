@@ -368,7 +368,7 @@ extract(){
             realFile="$(realpath $1)"
             mkdir "$folderName"
             cd "$folderName"
-            notifId="$(cat /proc/sys/kernel/random/uuid)"
+            notifId="${RANDOM}"
             termux-notification --content "Extracting..." --id "$notifId"
             case "$1" in
             *".zip"|*".jar"|*".apk")
